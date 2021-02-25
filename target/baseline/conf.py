@@ -4,7 +4,6 @@ from thrift import Thrift
 from thrift.transport import TSocket
 from thrift.transport import TTransport
 from thrift.protocol import TBinaryProtocol, TMultiplexedProtocol
-from _state import State
 from ipv4 import Cidr
 import struct
 
@@ -12,10 +11,8 @@ import struct
 class ControlPlane:
     client = None
     transport = None
-    stateInfo = None
 
     def __init__(self, port):
-        self.stateInfo = State()
         transport = TSocket.TSocket('127.0.0.1', port)
 
         # Buffering is critical. Raw sockets are very slow

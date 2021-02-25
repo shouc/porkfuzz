@@ -73,7 +73,10 @@ class SimpleSwitch:
 
         # Send Packet
         interface = f"veth_{this._id}_{port}_p"
-        sendp(content, iface=interface)
+        try:
+            sendp(content, iface=interface)
+        except Exception as e:
+            print(e)
 
     @staticmethod
     def __sniff_pkt(this, i, q):
