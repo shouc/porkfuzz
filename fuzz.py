@@ -4,6 +4,7 @@ from switch import SimpleSwitch
 from corpus import import_seed, get_one_mutated, new_cov
 from n4j import save
 import time
+import pickle
 
 # Init
 M = []
@@ -32,7 +33,10 @@ def fuzz(m: SimpleSwitch, i: int):
         if not is_cp:
             has_new_cov, intf, pkt, stateHash = m.send_pkt(content, port)
         else:
-            raise NotImplemented
+            c = pickle.load(content)
+            for k in c:
+                c[k].mutate()
+            has_new_cov, stateHash = m.control_plane_intake(**c)
 
         if has_new_cov:
             non_unique_cnt = 0
@@ -42,13 +46,25 @@ def fuzz(m: SimpleSwitch, i: int):
             if non_unique_cnt > STOP_THRESHOLD:
                 cstate = PRIORITY_QUEUE.pop()
                 if cstate:
-                    m.restart(cstate)
+                    if type(cstate) != bytes:
+                        cstate = cstate.encode("latin-1")
+                    vid = m._id
+                    del m
+                    time.sleep(0.5)
+                    stateFile = b"state/" + cstate
+                    m = SimpleSwitch(index=vid+10, port_count=PORT_COUNT, state_file_loc=stateFile.decode("latin-1"))
 
         if stateHash and state_changed(stateHash):
             PRIORITY_QUEUE.push(stateHash, 100)
 
         # Save to neo4j
-        save(prev_state_hash, stateHash if stateHash else prev_state_hash, (port, content, is_cp), fp)
+        save(
+             prev_state_hash,
+             stateHash if stateHash else prev_state_hash,
+             (port, content, is_cp),
+             (intf, pkt, False) if not is_cp else (None, None, True),
+             fp
+         )
         if stateHash:
             prev_state_hash = stateHash
         global counter

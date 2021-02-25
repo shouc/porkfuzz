@@ -6,8 +6,8 @@ PacketOf = Relationship.type("PacketOf")
 ResultOf = Relationship.type("ResultOf")
 
 
-def save(prev_state_hash, curr_state_hash, pkt_obj, fp):
-    fp.write(f"{prev_state_hash},{curr_state_hash},{hash_packet(*pkt_obj)}\n")
+def save(prev_state_hash, curr_state_hash, pkt_obj, result_obj, fp):
+    fp.write(f"{prev_state_hash},{curr_state_hash},{hash_packet(*pkt_obj)},{hash_packet(*result_obj)}\n")
 
 
 def _save(prev_state_hash, curr_state_hash, pkt_obj):

@@ -20,6 +20,7 @@ class SimpleSwitch:
     interfaces = []
     api = None
     port_count = 0
+    control_plane = None
 
     def create_veth(self, names):
         for name in names:
@@ -30,6 +31,7 @@ class SimpleSwitch:
             os.system(f"ip link set {name}_p mtu 950")
 
     def __init__(self, index: int = 1, port_count: int = 5, state_file_loc=None):
+        print(state_file_loc)
         self._id = index
         self.port_count = port_count
         # Coverage
@@ -58,7 +60,7 @@ class SimpleSwitch:
         self.cov.post_boot()
 
         # Start Control Plane
-        START_CONTROL_PLANE(self.thrift_port)
+        self.control_plane = CONTROL_PLANE_OBJ(self.thrift_port)
 
         # Connect to Thrift Instance
         self.api = SimpleSwitchAPI(self.thrift_port)
@@ -90,22 +92,18 @@ class SimpleSwitch:
 
     def send_pkt(self, content, port):
         q_sniff = Queue()
-        sniffers = []
         for i in self.interfaces:
             if port == int(i.split("_")[2]):
                 continue
             sniff_p = Process(target=SimpleSwitch.__sniff_pkt, args=(self, i, q_sniff))
             sniff_p.start()
-            sniffers.append(sniff_p)
         send_p = Process(target=SimpleSwitch.__send_pkt, args=(self, content, port))
         send_p.start()
         send_p.join()
-        for i in sniffers:
-            i.join()
         # print(q_sniff.qsize())
-        if q_sniff.qsize() > 0:
-            intf, ppkt, stateHash, newCov = q_sniff.get()
-        else:
+        try:
+            intf, ppkt, stateHash, newCov = q_sniff.get(timeout=1)
+        except:
             intf, ppkt, stateHash, newCov = None, None, None, None  # dropped or bounced
         if newCov == 1:
             print(f"New coverage with {self.cov.found_edge()} edges")
@@ -114,7 +112,14 @@ class SimpleSwitch:
             pass
         return newCov, intf, ppkt, stateHash
 
-    def restart(self, _hash):
+    def control_plane_intake(self, **kwargs):
+        self.cov.pre_execute()
+        self.control_plane.TakeInput(**kwargs)
+        hasNewCov = self.cov.cov_evaluate()
+        stateHash = self.api.client.bm_serialize_state()
+        return hasNewCov, stateHash
+
+    def __del__(self):
         self.process.kill()
-        stateFile = b"state/" + _hash
-        self.__init__(self._id, self.port_count, state_file_loc=stateFile)
+        self.cov.cov_clear_bitmap()
+        self.cov.cov_shutdown()
