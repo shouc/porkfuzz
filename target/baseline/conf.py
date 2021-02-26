@@ -5,6 +5,7 @@ from thrift.transport import TSocket
 from thrift.transport import TTransport
 from thrift.protocol import TBinaryProtocol, TMultiplexedProtocol
 from ipv4 import Cidr
+from mutable_types import Integer
 import struct
 
 
@@ -40,9 +41,9 @@ class ControlPlane:
         )
         print(entry_handle)
 
-    def TakeInput(self, cidr=Cidr(), port=1):
+    def TakeInput(self, cidr=Cidr(), port=Integer()):
         ip, prefix = cidr.get()
-        to_port = struct.pack("b", 0) + struct.pack("b", port % 3)
+        to_port = struct.pack("b", 0) + struct.pack("b", port.get() % 3)
         try:
             self.__add_table_entry(ip, to_port, prefix)
         except Exception as e:

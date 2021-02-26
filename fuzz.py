@@ -5,6 +5,8 @@ from corpus import import_seed, get_one_mutated, new_cov
 from n4j import save
 import time
 import pickle
+from mutable_types import *
+from ipv4 import *
 
 # Init
 M = []
@@ -33,7 +35,7 @@ def fuzz(m: SimpleSwitch, i: int):
         if not is_cp:
             has_new_cov, intf, pkt, stateHash = m.send_pkt(content, port)
         else:
-            c = pickle.load(content)
+            c = pickle.loads(content)
             for k in c:
                 c[k].mutate()
             has_new_cov, stateHash = m.control_plane_intake(**c)

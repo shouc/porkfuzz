@@ -31,15 +31,17 @@ class Mutator:
 
     @staticmethod
     def mutate(port, packet, is_cp) -> (int, bytes, bool):
+        if is_cp:
+            return port, packet, is_cp
         method = random.randint(0, 3)
         if method == 0:
-            return port, Mutator.flip_bit(packet), is_cp == b'1'
+            return port, Mutator.flip_bit(packet), is_cp
         elif method == 1:
-            return Mutator.switch_port(), packet, is_cp == b'1'
+            return Mutator.switch_port(), packet, is_cp
         elif method == 2:
-            return port, Mutator.concat(packet), is_cp == b'1'
+            return port, Mutator.concat(packet), is_cp
         elif method == 3:
-            return Mutator.switch_port(), Mutator.havoc(packet), is_cp == b'1'
+            return Mutator.switch_port(), Mutator.havoc(packet), is_cp
 
 
 def import_seed():
@@ -60,6 +62,7 @@ def get_one_mutated():
     assert len(seed_arr) == 3, "Weird, malformed seed"
     seed_arr[1] = base64.b64decode(seed_arr[1])
     seed_arr[0] = int(seed_arr[0])
+    seed_arr[2] = seed_arr[2] == b'1'
     return Mutator.mutate(*seed_arr)
 
 

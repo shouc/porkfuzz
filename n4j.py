@@ -4,6 +4,10 @@ from corpus import hash_packet
 
 InputOf = Relationship.type("InputOf")
 ResultOf = Relationship.type("ResultOf")
+PacketOf = Relationship.type("PacketOf")
+SubStructOf = Relationship.type("SubStructOf")
+KeyOf = Relationship.type("KeyOf")
+ElementOf = Relationship.type("ElementOf")
 
 
 def save(prev_state_hash, curr_state_hash, pkt_obj, result_obj, fp):
@@ -11,8 +15,8 @@ def save(prev_state_hash, curr_state_hash, pkt_obj, result_obj, fp):
 
 
 def _save(prev_state_hash, curr_state_hash, in_pkt, out_pkt):
-    prevStateNode = Node("State", hash=prev_state_hash)
-    currStateNode = Node("State", hash=curr_state_hash)
+    prevStateNode = Node("StateRoot", hash=prev_state_hash)
+    currStateNode = Node("StateRoot", hash=curr_state_hash)
     in_pkt = Node("Packet", hash=in_pkt)
     out_pkt = Node("Packet", hash=out_pkt)
     print(1)

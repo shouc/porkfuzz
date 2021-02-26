@@ -22,7 +22,6 @@ class Cidr(IPv4):
             self.ip = bytearray(b'\x89\x89\x89\x88')
         else: # r = 2
             self.prefix = random.randint(0, 31)
-        print(self.prefix, self.ip)
         # fix it up
         if self.prefix <= 8:
             self.ip[1:] = b'\x00\x00\x00'

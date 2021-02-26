@@ -5,7 +5,7 @@ from subprocess import Popen, PIPE
 from coverage import Coverage
 import time
 import os
-from scapy.all import sendp, sniff, conf
+from scapy.all import sendp, sniff, conf, wrpcap
 from multiprocessing import Process, Queue
 from api_wrapper import SimpleSwitchAPI
 
@@ -79,9 +79,13 @@ class SimpleSwitch:
             print(e)
 
     @staticmethod
-    def __sniff_pkt(this, i, q):
+    def __sniff_pkt(this, i, q, plain):
         try:
             pkt = sniff(iface=f"{i}_p", timeout=0.3)[0]
+            wrpcap(f"pcap/{i}.pcap", [pkt], append=True)
+            if plain:
+                return
+
             # Get State Info
             stateHash = this.api.client.bm_serialize_state()
 
@@ -97,8 +101,10 @@ class SimpleSwitch:
         q_sniff = Queue()
         for i in self.interfaces:
             if port == int(i.split("_")[2]):
+                sniff_p = Process(target=SimpleSwitch.__sniff_pkt, args=(self, i, q_sniff, True))
+                sniff_p.start()
                 continue
-            sniff_p = Process(target=SimpleSwitch.__sniff_pkt, args=(self, i, q_sniff))
+            sniff_p = Process(target=SimpleSwitch.__sniff_pkt, args=(self, i, q_sniff, False))
             sniff_p.start()
         send_p = Process(target=SimpleSwitch.__send_pkt, args=(self, content, port))
         send_p.start()
@@ -120,6 +126,7 @@ class SimpleSwitch:
         self.control_plane.TakeInput(**kwargs)
         hasNewCov = self.cov.cov_evaluate()
         stateHash = self.api.client.bm_serialize_state()
+        print("Pinging control plane")
         return hasNewCov, stateHash
 
     def __del__(self):
