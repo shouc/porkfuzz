@@ -93,6 +93,7 @@ if len(sys.argv) <= 1 or sys.argv[1] == '--help':
     print('  string bm_get_config_md5()')
     print('  i32 bm_get_id_from_name(i32 cxt_id, BmResourceType resource_type, string resource_name)')
     print('  string bm_serialize_state()')
+    print('  string bm_deserialize_state(string file_name)')
     print('')
     sys.exit(0)
 
@@ -585,6 +586,12 @@ elif cmd == 'bm_serialize_state':
         print('bm_serialize_state requires 0 args')
         sys.exit(1)
     pp.pprint(client.bm_serialize_state())
+
+elif cmd == 'bm_deserialize_state':
+    if len(args) != 1:
+        print('bm_deserialize_state requires 1 args')
+        sys.exit(1)
+    pp.pprint(client.bm_deserialize_state(args[0],))
 
 else:
     print('Unrecognized method %s' % cmd)

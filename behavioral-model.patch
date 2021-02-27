@@ -1,0 +1,420 @@
+[1mdiff --git a/include/bm/bm_sim/switch.h b/include/bm/bm_sim/switch.h[m
+[1mindex 70923ff..3b067bb 100644[m
+[1m--- a/include/bm/bm_sim/switch.h[m
+[1m+++ b/include/bm/bm_sim/switch.h[m
+[36m@@ -112,6 +112,7 @@[m [mclass SwitchWContexts : public DevMgr, public RuntimeInterface {[m
+   Context *get_context(cxt_id_t cxt_id = 0u) {[m
+     return &contexts.at(cxt_id);[m
+   }[m
+[32m+[m[32m  int deserialize_from_file(const std::string &state_dump_path);[m
+ [m
+   int receive(port_t port_num, const char *buffer, int len);[m
+ [m
+[36m@@ -868,7 +869,6 @@[m [mclass SwitchWContexts : public DevMgr, public RuntimeInterface {[m
+   }[m
+ [m
+   int deserialize(std::istream *in);[m
+[31m-  int deserialize_from_file(const std::string &state_dump_path);[m
+ [m
+  private:[m
+   int init_objects(std::istream *is, device_id_t dev_id,[m
+[1mdiff --git a/src/bm_runtime/Standard_server.cpp b/src/bm_runtime/Standard_server.cpp[m
+[1mindex 5591e72..858fc49 100644[m
+[1m--- a/src/bm_runtime/Standard_server.cpp[m
+[1m+++ b/src/bm_runtime/Standard_server.cpp[m
+[36m@@ -18,15 +18,200 @@[m
+  *[m
+  */[m
+ [m
+[32m+[m
+ #include <bm/Standard.h>[m
+ [m
+ #include <bm/bm_sim/_assert.h>[m
+ #include <bm/bm_sim/logger.h>[m
+ #include <bm/bm_sim/switch.h>[m
+ #include <bm/thrift/stdcxx.h>[m
+[31m-[m
+[32m+[m[32m#include "fstream"[m
+ #include <functional>[m
+ [m
+[32m+[m
+[32m+[m[32m/// hashing[m
+[32m+[m
+[32m+[m[32mclass SHA256[m
+[32m+[m[32m{[m
+[32m+[m[32mprotected:[m
+[32m+[m[32m    typedef unsigned char uint8;[m
+[32m+[m[32m    typedef unsigned int uint32;[m
+[32m+[m[32m    typedef unsigned long long uint64;[m
+[32m+[m
+[32m+[m[32m    const static uint32 sha256_k[];[m
+[32m+[m[32m    static const unsigned int SHA224_256_BLOCK_SIZE = (512/8);[m
+[32m+[m[32mpublic:[m
+[32m+[m[32m    void init();[m
+[32m+[m[32m    void update(const unsigned char *message, unsigned int len);[m
+[32m+[m[32m    void final(unsigned char *digest);[m
+[32m+[m[32m    static const unsigned int DIGEST_SIZE = ( 256 / 8);[m
+[32m+[m
+[32m+[m[32mprotected:[m
+[32m+[m[32m    void transform(const unsigned char *message, unsigned int block_nb);[m
+[32m+[m[32m    unsigned int m_tot_len;[m
+[32m+[m[32m    unsigned int m_len;[m
+[32m+[m[32m    unsigned char m_block[2*SHA224_256_BLOCK_SIZE];[m
+[32m+[m[32m    uint32 m_h[8];[m
+[32m+[m[32m};[m
+[32m+[m
+[32m+[m[32mstd::string sha256(std::string input);[m
+[32m+[m
+[32m+[m
+[32m+[m[32m#define SHA2_SHFR(x, n)    (x >> n)[m
+[32m+[m[32m#define SHA2_ROTR(x, n)   ((x >> n) | (x << ((sizeof(x) << 3) - n)))[m
+[32m+[m[32m#define SHA2_ROTL(x, n)   ((x << n) | (x >> ((sizeof(x) << 3) - n)))[m
+[32m+[m[32m#define SHA2_CH(x, y, z)  ((x & y) ^ (~x & z))[m
+[32m+[m[32m#define SHA2_MAJ(x, y, z) ((x & y) ^ (x & z) ^ (y & z))[m
+[32m+[m[32m#define SHA256_F1(x) (SHA2_ROTR(x,  2) ^ SHA2_ROTR(x, 13) ^ SHA2_ROTR(x, 22))[m
+[32m+[m[32m#define SHA256_F2(x) (SHA2_ROTR(x,  6) ^ SHA2_ROTR(x, 11) ^ SHA2_ROTR(x, 25))[m
+[32m+[m[32m#define SHA256_F3(x) (SHA2_ROTR(x,  7) ^ SHA2_ROTR(x, 18) ^ SHA2_SHFR(x,  3))[m
+[32m+[m[32m#define SHA256_F4(x) (SHA2_ROTR(x, 17) ^ SHA2_ROTR(x, 19) ^ SHA2_SHFR(x, 10))[m
+[32m+[m[32m#define SHA2_UNPACK32(x, str)                 \[m
+[32m+[m[32m{                                             \[m
+[32m+[m[32m    *((str) + 3) = (uint8) ((x)      );       \[m
+[32m+[m[32m    *((str) + 2) = (uint8) ((x) >>  8);       \[m
+[32m+[m[32m    *((str) + 1) = (uint8) ((x) >> 16);       \[m
+[32m+[m[32m    *((str) + 0) = (uint8) ((x) >> 24);       \[m
+[32m+[m[32m}[m
+[32m+[m[32m#define SHA2_PACK32(str, x)                   \[m
+[32m+[m[32m{                                             \[m
+[32m+[m[32m    *(x) =   ((uint32) *((str) + 3)      )    \[m
+[32m+[m[32m           | ((uint32) *((str) + 2) <<  8)    \[m
+[32m+[m[32m           | ((uint32) *((str) + 1) << 16)    \[m
+[32m+[m[32m           | ((uint32) *((str) + 0) << 24);   \[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mconst unsigned int SHA256::sha256_k[64] = //UL = uint32[m
+[32m+[m[32m        {0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,[m
+[32m+[m[32m         0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,[m
+[32m+[m[32m         0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,[m
+[32m+[m[32m         0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,[m
+[32m+[m[32m         0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,[m
+[32m+[m[32m         0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,[m
+[32m+[m[32m         0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,[m
+[32m+[m[32m         0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,[m
+[32m+[m[32m         0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,[m
+[32m+[m[32m         0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,[m
+[32m+[m[32m         0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,[m
+[32m+[m[32m         0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,[m
+[32m+[m[32m         0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,[m
+[32m+[m[32m         0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,[m
+[32m+[m[32m         0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,[m
+[32m+[m[32m         0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};[m
+[32m+[m
+[32m+[m[32mvoid SHA256::transform(const unsigned char *message, unsigned int block_nb)[m
+[32m+[m[32m{[m
+[32m+[m[32m    uint32 w[64];[m
+[32m+[m[32m    uint32 wv[8];[m
+[32m+[m[32m    uint32 t1, t2;[m
+[32m+[m[32m    const unsigned char *sub_block;[m
+[32m+[m[32m    int i;[m
+[32m+[m[32m    int j;[m
+[32m+[m[32m    for (i = 0; i < (int) block_nb; i++) {[m
+[32m+[m[32m        sub_block = message + (i << 6);[m
+[32m+[m[32m        for (j = 0; j < 16; j++) {[m
+[32m+[m[32m            SHA2_PACK32(&sub_block[j << 2], &w[j]);[m
+[32m+[m[32m        }[m
+[32m+[m[32m        for (j = 16; j < 64; j++) {[m
+[32m+[m[32m            w[j] =  SHA256_F4(w[j -  2]) + w[j -  7] + SHA256_F3(w[j - 15]) + w[j - 16];[m
+[32m+[m[32m        }[m
+[32m+[m[32m        for (j = 0; j < 8; j++) {[m
+[32m+[m[32m            wv[j] = m_h[j];[m
+[32m+[m[32m        }[m
+[32m+[m[32m        for (j = 0; j < 64; j++) {[m
+[32m+[m[32m            t1 = wv[7] + SHA256_F2(wv[4]) + SHA2_CH(wv[4], wv[5], wv[6])[m
+[32m+[m[32m                 + sha256_k[j] + w[j];[m
+[32m+[m[32m            t2 = SHA256_F1(wv[0]) + SHA2_MAJ(wv[0], wv[1], wv[2]);[m
+[32m+[m[32m            wv[7] = wv[6];[m
+[32m+[m[32m            wv[6] = wv[5];[m
+[32m+[m[32m            wv[5] = wv[4];[m
+[32m+[m[32m            wv[4] = wv[3] + t1;[m
+[32m+[m[32m            wv[3] = wv[2];[m
+[32m+[m[32m            wv[2] = wv[1];[m
+[32m+[m[32m            wv[1] = wv[0];[m
+[32m+[m[32m            wv[0] = t1 + t2;[m
+[32m+[m[32m        }[m
+[32m+[m[32m        for (j = 0; j < 8; j++) {[m
+[32m+[m[32m            m_h[j] += wv[j];[m
+[32m+[m[32m        }[m
+[32m+[m[32m    }[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mvoid SHA256::init()[m
+[32m+[m[32m{[m
+[32m+[m[32m    m_h[0] = 0x6a09e667;[m
+[32m+[m[32m    m_h[1] = 0xbb67ae85;[m
+[32m+[m[32m    m_h[2] = 0x3c6ef372;[m
+[32m+[m[32m    m_h[3] = 0xa54ff53a;[m
+[32m+[m[32m    m_h[4] = 0x510e527f;[m
+[32m+[m[32m    m_h[5] = 0x9b05688c;[m
+[32m+[m[32m    m_h[6] = 0x1f83d9ab;[m
+[32m+[m[32m    m_h[7] = 0x5be0cd19;[m
+[32m+[m[32m    m_len = 0;[m
+[32m+[m[32m    m_tot_len = 0;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mvoid SHA256::update(const unsigned char *message, unsigned int len)[m
+[32m+[m[32m{[m
+[32m+[m[32m    unsigned int block_nb;[m
+[32m+[m[32m    unsigned int new_len, rem_len, tmp_len;[m
+[32m+[m[32m    const unsigned char *shifted_message;[m
+[32m+[m[32m    tmp_len = SHA224_256_BLOCK_SIZE - m_len;[m
+[32m+[m[32m    rem_len = len < tmp_len ? len : tmp_len;[m
+[32m+[m[32m    memcpy(&m_block[m_len], message, rem_len);[m
+[32m+[m[32m    if (m_len + len < SHA224_256_BLOCK_SIZE) {[m
+[32m+[m[32m        m_len += len;[m
+[32m+[m[32m        return;[m
+[32m+[m[32m    }[m
+[32m+[m[32m    new_len = len - rem_len;[m
+[32m+[m[32m    block_nb = new_len / SHA224_256_BLOCK_SIZE;[m
+[32m+[m[32m    shifted_message = message + rem_len;[m
+[32m+[m[32m    transform(m_block, 1);[m
+[32m+[m[32m    transform(shifted_message, block_nb);[m
+[32m+[m[32m    rem_len = new_len % SHA224_256_BLOCK_SIZE;[m
+[32m+[m[32m    memcpy(m_block, &shifted_message[block_nb << 6], rem_len);[m
+[32m+[m[32m    m_len = rem_len;[m
+[32m+[m[32m    m_tot_len += (block_nb + 1) << 6;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mvoid SHA256::final(unsigned char *digest)[m
+[32m+[m[32m{[m
+[32m+[m[32m    unsigned int block_nb;[m
+[32m+[m[32m    unsigned int pm_len;[m
+[32m+[m[32m    unsigned int len_b;[m
+[32m+[m[32m    int i;[m
+[32m+[m[32m    block_nb = (1 + ((SHA224_256_BLOCK_SIZE - 9)[m
+[32m+[m[32m                     < (m_len % SHA224_256_BLOCK_SIZE)));[m
+[32m+[m[32m    len_b = (m_tot_len + m_len) << 3;[m
+[32m+[m[32m    pm_len = block_nb << 6;[m
+[32m+[m[32m    memset(m_block + m_len, 0, pm_len - m_len);[m
+[32m+[m[32m    m_block[m_len] = 0x80;[m
+[32m+[m[32m    SHA2_UNPACK32(len_b, m_block + pm_len - 4);[m
+[32m+[m[32m    transform(m_block, block_nb);[m
+[32m+[m[32m    for (i = 0 ; i < 8; i++) {[m
+[32m+[m[32m        SHA2_UNPACK32(m_h[i], &digest[i << 2]);[m
+[32m+[m[32m    }[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mstd::string sha256(std::string input)[m
+[32m+[m[32m{[m
+[32m+[m[32m    unsigned char digest[SHA256::DIGEST_SIZE];[m
+[32m+[m[32m    memset(digest,0,SHA256::DIGEST_SIZE);[m
+[32m+[m
+[32m+[m[32m    SHA256 ctx = SHA256();[m
+[32m+[m[32m    ctx.init();[m
+[32m+[m[32m    ctx.update( (unsigned char*)input.c_str(), input.length());[m
+[32m+[m[32m    ctx.final(digest);[m
+[32m+[m
+[32m+[m[32m    char buf[2*SHA256::DIGEST_SIZE+1];[m
+[32m+[m[32m    buf[2*SHA256::DIGEST_SIZE] = 0;[m
+[32m+[m[32m    for (int i = 0; i < SHA256::DIGEST_SIZE; i++)[m
+[32m+[m[32m        sprintf(buf+i*2, "%02x", digest[i]);[m
+[32m+[m[32m    return std::string(buf);[m
+[32m+[m[32m}[m
+[32m+[m[32m/// End hashing[m
+[32m+[m
+[32m+[m
+ namespace bm_runtime { namespace standard {[m
+ [m
+ using namespace bm;[m
+[36m@@ -1233,11 +1418,20 @@[m [mpublic:[m
+     return static_cast<int32_t>(resource_id);[m
+   }[m
+ [m
+[32m+[m[32m    void bm_deserialize_state(std::string& _return, const std::string& file_name){[m
+[32m+[m[32m      switch_->deserialize_from_file(file_name);[m
+[32m+[m[32m  }[m
+[32m+[m
+   void bm_serialize_state(std::string& _return) {[m
+     Logger::get()->trace("bm_serialize_state");[m
+     std::ostringstream stream;[m
+     switch_->serialize(&stream);[m
+[31m-    _return.append(stream.str());[m
+[32m+[m[32m    auto _hash = sha256(stream.str());[m
+[32m+[m[32m    std::ofstream myfile;[m
+[32m+[m[32m    myfile.open ("state/" + _hash);[m
+[32m+[m[32m    myfile << stream.str();[m
+[32m+[m[32m    myfile.close();[m
+[32m+[m[32m    _return.append(_hash);[m
+   }[m
+ [m
+ private:[m
+[1mdiff --git a/src/bm_sim/switch.cpp b/src/bm_sim/switch.cpp[m
+[1mindex 1839b9a..20cf75d 100644[m
+[1m--- a/src/bm_sim/switch.cpp[m
+[1m+++ b/src/bm_sim/switch.cpp[m
+[36m@@ -414,10 +414,10 @@[m [mSwitchWContexts::deserialize(std::istream *in) {[m
+     return 1;[m
+   }[m
+   std::string md5sum; (*in) >> md5sum;[m
+[31m-  if (md5sum != md5sum_expected) {[m
+[31m-    std::cout << "state dump input does not match JSON config input\n";[m
+[31m-    return 1;[m
+[31m-  }[m
+[32m+[m[32m//  if (md5sum != md5sum_expected) {[m
+[32m+[m[32m//    std::cout << "state dump input does not match JSON config input\n";[m
+[32m+[m[32m//    return 1;[m
+[32m+[m[32m//  }[m
+   for (auto &cxt : contexts) {[m
+     ErrorCode rc = cxt.deserialize(in);[m
+     if (rc != ErrorCode::SUCCESS) return 1;[m
+[1mdiff --git a/targets/simple_switch/main.cpp b/targets/simple_switch/main.cpp[m
+[1mindex b3d817a..ff403bd 100644[m
+[1m--- a/targets/simple_switch/main.cpp[m
+[1m+++ b/targets/simple_switch/main.cpp[m
+[36m@@ -19,7 +19,7 @@[m
+  */[m
+ [m
+ /* Switch instance */[m
+[31m-[m
+[32m+[m[32m//[m
+ #include <bm/config.h>[m
+ [m
+ #include <bm/SimpleSwitch.h>[m
+[36m@@ -37,8 +37,115 @@[m [mnamespace sswitch_runtime {[m
+ shared_ptr<SimpleSwitchIf> get_handler(SimpleSwitch *sw);[m
+ }  // namespace sswitch_runtime[m
+ [m
+[32m+[m[32m//[m
+[32m+[m[32m// BEGIN FUZZING CODE[m
+[32m+[m[32m//[m
+[32m+[m[32m#include <fcntl.h>[m
+[32m+[m[32m#include <sys/mman.h>[m
+[32m+[m[32m#include <sys/stat.h>[m
+[32m+[m[32m#include <unistd.h>[m
+[32m+[m[32m#include <cerrno>[m
+[32m+[m[32m#include <cstdint>[m
+[32m+[m[32m#include <cstdio>[m
+[32m+[m[32m#include <cstdlib>[m
+[32m+[m[32m#include <string>[m
+[32m+[m[32m#define REPRL_CRFD 100[m
+[32m+[m[32m#define REPRL_CWFD 101[m
+[32m+[m[32m#define REPRL_DRFD 102[m
+[32m+[m[32m#define REPRL_DWFD 103[m
+[32m+[m
+[32m+[m[32m#define SHM_SIZE 0x100000[m
+[32m+[m[32m#define MAX_EDGES ((SHM_SIZE - 4) * 8)[m
+[32m+[m
+[32m+[m[32m#define CHECK(cond)                            \[m
+[32m+[m[32m  if (!(cond)) {                               \[m
+[32m+[m[32m    fprintf(stderr, "\"" #cond "\" failed\n"); \[m
+[32m+[m[32m    _exit(-1);                                 \[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32mstruct SharedMemData {[m
+[32m+[m[32m  uint32_t numEdges;[m
+[32m+[m[32m  unsigned char edges[];[m
+[32m+[m[32m};[m
+[32m+[m
+[32m+[m[32mstruct SharedMemData *shmem;[m
+[32m+[m
+[32m+[m[32muint32_t *__edges_start, *__edges_stop;[m
+[32m+[m[32mvoid __sanitizer_cov_reset_edgeguards() {[m
+[32m+[m[32m  uint64_t N = 0;[m
+[32m+[m[32m  for (uint32_t *x = __edges_start; x < __edges_stop && N < MAX_EDGES; x++)[m
+[32m+[m[32m    *x = ++N;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mextern "C" void __sanitizer_cov_trace_pc_guard_init([m
+[32m+[m[32m    uint32_t *start,[m
+[32m+[m[32m    uint32_t *stop) {[m
+[32m+[m[32m  // Avoid duplicate initialization[m
+[32m+[m[32m  if (start == stop || *start)[m
+[32m+[m[32m    return;[m
+[32m+[m
+[32m+[m[32m  if (__edges_start != nullptr || __edges_stop != nullptr) {[m
+[32m+[m[32m    fprintf([m
+[32m+[m[32m        stderr,[m
+[32m+[m[32m        "Coverage instrumentation is only supported for a single module\n");[m
+[32m+[m[32m    _exit(-1);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  __edges_start = start;[m
+[32m+[m[32m  __edges_stop = stop;[m
+[32m+[m
+[32m+[m[32m  // Map the shared memory region[m
+[32m+[m[32m  const char *shm_key = getenv("SHM_ID");[m
+[32m+[m[32m  if (!shm_key) {[m
+[32m+[m[32m    puts("[COV] no shared memory bitmap available, skipping");[m
+[32m+[m[32m    shmem = (struct SharedMemData *)malloc(SHM_SIZE);[m
+[32m+[m[32m  } else {[m
+[32m+[m[32m    int fd = shm_open(shm_key, O_RDWR, S_IREAD | S_IWRITE);[m
+[32m+[m[32m    if (fd <= -1) {[m
+[32m+[m[32m      fprintf([m
+[32m+[m[32m          stderr, "Failed to open shared memory region: %s\n", strerror(errno));[m
+[32m+[m[32m      _exit(-1);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    shmem = (struct SharedMemData *)mmap([m
+[32m+[m[32m        nullptr, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);[m
+[32m+[m[32m    if (shmem == MAP_FAILED) {[m
+[32m+[m[32m      fprintf(stderr, "Failed to mmap shared memory region\n");[m
+[32m+[m[32m      _exit(-1);[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  __sanitizer_cov_reset_edgeguards();[m
+[32m+[m
+[32m+[m[32m  shmem->numEdges = stop - start;[m
+[32m+[m[32m  printf([m
+[32m+[m[32m      "[COV] edge counters initialized. Shared memory: %s with %u edges\n",[m
+[32m+[m[32m      shm_key,[m
+[32m+[m[32m      shmem->numEdges);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mextern "C" void __sanitizer_cov_trace_pc_guard(uint32_t *guard) {[m
+[32m+[m[32m  // There's a small race condition here: if this function executes in two[m
+[32m+[m[32m  // threads for the same edge at the same time, the first thread might disable[m
+[32m+[m[32m  // the edge (by setting the guard to zero) before the second thread fetches[m
+[32m+[m[32m  // the guard value (and thus the index). However, our instrumentation ignores[m
+[32m+[m[32m  // the first edge (see libcoverage.c) and so the race is unproblematic.[m
+[32m+[m[32m  uint32_t index = *guard;[m
+[32m+[m[32m  // If this function is called before coverage instrumentation is properly[m
+[32m+[m[32m  // initialized we want to return early.[m
+[32m+[m[32m  if (!index)[m
+[32m+[m[32m    return;[m
+[32m+[m[32m  shmem->edges[index / 8] |= 1 << (index % 8);[m
+[32m+[m[32m  *guard = 0;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m//[m
+[32m+[m[32m// END FUZZING CODE[m
+[32m+[m[32m//[m
+[32m+[m
+ int[m
+ main(int argc, char* argv[]) {[m
+[32m+[m[32m    printf("2\n");[m
+   bm::TargetParserBasicWithDynModules simple_switch_parser;[m
+   simple_switch_parser.add_flag_option([m
+       "enable-swap",[m
+[1mdiff --git a/thrift_src/standard.thrift b/thrift_src/standard.thrift[m
+[1mindex 1f8f00a..132a972 100644[m
+[1m--- a/thrift_src/standard.thrift[m
+[1m+++ b/thrift_src/standard.thrift[m
+[36m@@ -724,4 +724,7 @@[m [mservice Standard {[m
+   ) throws (1:InvalidIdLookup ouch)[m
+ [m
+   string bm_serialize_state()[m
+[32m+[m[32m  string bm_deserialize_state([m
+[32m+[m[32m    1:string file_name[m
+[32m+[m[32m  )[m
+ }[m
+[1mdiff --git a/travis/common.sh b/travis/common.sh[m
+[1mold mode 100644[m
+[1mnew mode 100755[m
+[1mdiff --git a/travis/install-nanomsg.sh b/travis/install-nanomsg.sh[m
+[1mold mode 100644[m
+[1mnew mode 100755[m
+[1mdiff --git a/travis/install-nnpy.sh b/travis/install-nnpy.sh[m
+[1mold mode 100644[m
+[1mnew mode 100755[m
+[1mdiff --git a/travis/install-thrift.sh b/travis/install-thrift.sh[m
+[1mold mode 100644[m
+[1mnew mode 100755[m

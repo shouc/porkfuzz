@@ -50,11 +50,9 @@ def fuzz(m: SimpleSwitch, i: int):
                 if cstate:
                     if type(cstate) != bytes:
                         cstate = cstate.encode("latin-1")
-                    vid = m._id
-                    del m
                     time.sleep(0.5)
                     stateFile = b"state/" + cstate
-                    m = SimpleSwitch(index=vid+10, port_count=PORT_COUNT, state_file_loc=stateFile.decode("latin-1"))
+                    m.api.client.bm_deserialize_state(stateFile)
 
         if stateHash and state_changed(stateHash):
             PRIORITY_QUEUE.push(stateHash, 100)

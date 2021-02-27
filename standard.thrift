@@ -724,4 +724,7 @@ service Standard {
   ) throws (1:InvalidIdLookup ouch)
 
   string bm_serialize_state()
+  string bm_deserialize_state(
+    1:string file_name
+  )
 }
